@@ -131,14 +131,26 @@ static bool matchSubnet(struct ifaddrs local_if, union socketAddress remote) {
     return false;
   }
 
+  // 子网掩码例子：
+  // 当子网掩码为255.255.255.252时，子网是如何划分的？
+  // 将该子网掩码转换成二进制为30个1和2个0，
+  // 表示每个子网中只有4个IP地址（2的2次方），192.168.1.0-255的地址段共可划分64个子网，
+  // 第一个子网的地址范围是192.168.1.0-192.168.1.3，
+  // 第二个子网的地址范围是192.168.1.4-192.168.1.7，
+  // 依次类推。其中每个子网第一个和最后一个IP地址不可用(规定每个子网的第一个IP地址为网段地址，
+  // 最后一个IP地址为广播地址，都不可用)，可用的只有2个IP地址。也就是说：
+  // 如果子网掩码设置为255.255.255.252，那么该子网只能容纳两台电脑，
+  // 而且这两台电脑的IP必须在一个子网内才能正常联网，例如一台电脑的IP设为192.168.1.10，
+  // 另外一台电脑的IP必须设置为192.168.1.9。
+
   if (family == AF_INET) { 
     struct sockaddr_in* local_addr = (struct sockaddr_in*)(local_if.ifa_addr);
     struct sockaddr_in* mask = (struct sockaddr_in*)(local_if.ifa_netmask);
     struct sockaddr_in& remote_addr = remote.sin;
     struct in_addr local_subnet, remote_subnet;
     local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;  // 利用子网掩码进行判断
-    remote_subnet.s_addr = remote_addr.sin_addr.s_addr & mask->sin_addr.s_addr;
-    return (local_subnet.s_addr ^ remote_subnet.s_addr) ? false : true;
+    remote_subnet.s_addr = remote_addr.sin_addr.s_addr & mask->sin_addr.s_addr;  // 位运算符 与
+    return (local_subnet.s_addr ^ remote_subnet.s_addr) ? false : true;  // ^ 位运算符 异或
   } else if (family == AF_INET6) {
     struct sockaddr_in6* local_addr = (struct sockaddr_in6*)(local_if.ifa_addr);
     struct sockaddr_in6* mask = (struct sockaddr_in6*)(local_if.ifa_netmask);
@@ -168,7 +180,11 @@ static bool matchSubnet(struct ifaddrs local_if, union socketAddress remote) {
 }
 
 // 被ncclSocketListen()和findInterfaces()调用
-static int findInterfaceMatchSubnet(char* ifNames, union socketAddress* localAddrs, union socketAddress remoteAddr, int ifNameMaxSize, int maxIfs) {
+static int findInterfaceMatchSubnet(char* ifNames, 
+                                    union socketAddress* localAddrs, 
+                                    union socketAddress remoteAddr, 
+                                    int ifNameMaxSize, 
+                                    int maxIfs) {
   char line[1024], line_a[1024];
   int found = 0;
   struct ifaddrs *interfaces, *interface;

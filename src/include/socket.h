@@ -148,7 +148,26 @@ static bool matchSubnet(struct ifaddrs local_if, union socketAddress remote) {
     struct sockaddr_in* mask = (struct sockaddr_in*)(local_if.ifa_netmask);
     struct sockaddr_in& remote_addr = remote.sin;
     struct in_addr local_subnet, remote_subnet;
-    local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;  // 利用子网掩码进行判断
+    /**
+     * 子网掩码：255.255.255.252    11111111.11111111.11111111.11111100
+     * 网段： 192.168.1.0
+     * 4个ip为一个子网，如192.168.1.0，192.168.1.1，192.168.1.2，192.168.1.3为同一子网，
+     * 但是192.168.1.0和192.168.1.3不可用
+     * 可以利用子网掩码判断两个ip是否属于网之
+     * 例如：192.168.1.1和192.168.1.2在同一子网中，所以与子网掩码位与的结果相同
+     * 11000000.10101000.00000001.000000 01 & 11111111.11111111.11111111.111111 00 --> 11000000.10101000.00000001.000000 00
+     * 11000000.10101000.00000001.000000 10 & 11111111.11111111.11111111.111111 00 --> 11000000.10101000.00000001.000000 00
+     * 结果进行异或：
+     * 11000000.10101000.00000001.000000 00 ^ 11000000.10101000.00000001.000000 00 --> 00000000.00000000.00000000.000000000
+     * 全0 --> 同一子网
+     * 而192.168.1.1和192.168.1.5不在同一子网中，所以与子网掩码位与的结果不相同
+     * 11000000.10101000.00000001.000000 01 & 11111111.11111111.11111111.111111 00 --> 11000000.10101000.00000001.000000 00
+     * 11000000.10101000.00000001.000001 01 & 11111111.11111111.11111111.111111 00 --> 11000000.10101000.00000001.000001 00
+     * 结果进行异或：
+     * 11000000.10101000.00000001.000000 00 ^ 11000000.10101000.00000001.000001 00 --> 00000000.00000000.00000001.000000000
+     * 非全0 --> 非同一子网                                                                                                      |
+     * */
+    local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;  // 与子网掩码进行 位与 运算，判断是否属于该子网
     remote_subnet.s_addr = remote_addr.sin_addr.s_addr & mask->sin_addr.s_addr;  // 位运算符 与
     return (local_subnet.s_addr ^ remote_subnet.s_addr) ? false : true;  // ^ 位运算符 异或
   } else if (family == AF_INET6) {
@@ -233,6 +252,7 @@ static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char*
   if (!ipv6) {
     struct netIf ni;
     // parse <ip_or_hostname>:<port> string, expect one pair
+    // ip_port_pair中存储的可能是ip或者主机名
     if (parseStringList(ip_port_pair, &ni, 1) != 1) {
       WARN("Net : No valid <IPv4_or_hostname>:<port> pair found");
       return ncclInvalidArgument;
@@ -241,7 +261,7 @@ static ncclResult_t GetSocketAddrFromString(union socketAddress* ua, const char*
     struct addrinfo hints, *p;
     int rv;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_UNSPEC;  // 协议无关
     hints.ai_socktype = SOCK_STREAM;
 
     if ( (rv = getaddrinfo(ni.prefix, NULL, &hints, &p)) != 0) {
@@ -327,7 +347,7 @@ static int findInterfaces(char* ifNames, union socketAddress *ifAddrs, int ifNam
     nIfs = findInterfaces("ib", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
     // else see if we can get some hint from COMM ID
     if (nIfs == 0) {
-      char* commId = getenv("NCCL_COMM_ID");
+      char* commId = getenv("NCCL_COMM_ID");  // ip_port_pair  ipv4 or ipv6
       if (commId && strlen(commId) > 1) {
         // Try to find interface that is in the same subnet as the IP in comm id
         // 从子网中查找
